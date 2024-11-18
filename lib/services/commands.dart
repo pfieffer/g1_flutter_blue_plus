@@ -129,6 +129,8 @@ Future<String?> sendTextPacket({
 
   try {
     if (bluetoothManager.leftGlass != null && bluetoothManager.rightGlass != null) {
+
+
       // Send to the left glass and wait
       await bluetoothManager.leftGlass!.sendData(aiResultCommand);
       await Future.delayed(Duration(milliseconds: delay));
@@ -185,7 +187,7 @@ Future<String?> sendText(String textMessage, BluetoothManager bluetoothManager, 
 
     String text = pageLines.join('\n');
     lastPageText = text;
-    int screenStatus = AIStatus.DISPLAYING;
+    int screenStatus = AIStatus.DISPLAYING | ScreenAction.NEW_CONTENT;
 
     await sendTextPacket(
       textMessage: text,

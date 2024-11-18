@@ -142,7 +142,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   if (bluetoothManager.leftGlass != null && bluetoothManager.rightGlass != null) {
-    await sendTextPacket(textMessage: text, bluetoothManager: bluetoothManager);
+    await sendText(
+      text,
+      bluetoothManager,
+      duration: 5.0,
+    );
   } else {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Glasses are not connected')),
