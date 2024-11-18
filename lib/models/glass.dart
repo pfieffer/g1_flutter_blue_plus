@@ -1,6 +1,7 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:async';
 import '../services/commands.dart';
+import '../services/reciever.dart';
 import '../utils/constants.dart';
 
 class Glass {
@@ -81,10 +82,11 @@ class Glass {
     }
   }
 
-  void handleNotification(List<int> data) {
+  void handleNotification(List<int> data) async {
     String hexData = data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
     print('[$side Glass] Received data: $hexData');
-    // TODO: Parse and handle the data according to your protocol
+    // Call the receive handler function
+    await receiveHandler(side, data);
   }
 
   Future<void> sendData(List<int> data) async {

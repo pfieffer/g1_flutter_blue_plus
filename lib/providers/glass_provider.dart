@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../models/glass.dart';
-import '../services/bluetooth_manager.dart';
 
 class GlassProvider with ChangeNotifier {
   String _leftStatus = 'Disconnected';
