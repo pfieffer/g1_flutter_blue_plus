@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:even_glasses/models/notification.dart';
+
 import '../services/bluetooth_manager.dart';
 
 enum Command {
@@ -215,4 +217,36 @@ Future<String?> sendText(String textMessage, BluetoothManager bluetoothManager, 
   );
 
   return textMessage;
+}
+
+Future<void> sendNotification(String message, BluetoothManager bluetoothManager) async {
+
+  NCSNotification notification = NCSNotification(
+    msgId: 1,
+    type: 1,
+    appIdentifier: 'org.telegram.messenger',
+    title: 'Notification Title',
+    subtitle: 'Notification Subtitle',
+    message: message,
+    displayName: "Test App",
+  );
+
+  Notification ntf = Notification(ncsNotification: notification);
+
+  List<List<int>> notificationChunks = await ntf.constructNotification();
+
+  try {
+    if (bluetoothManager.leftGlass != null && bluetoothManager.rightGlass != null) {
+      for (int i = 0; i < notificationChunks.length; i++) {
+        await bluetoothManager.leftGlass!.sendData(notificationChunks[i]);
+        await Future.delayed(Duration(milliseconds: 100));
+        await bluetoothManager.rightGlass!.sendData(notificationChunks[i]);
+        await Future.delayed(Duration(milliseconds: 100));
+      }
+    } else {
+      print("Could not connect to glasses devices.");
+    }
+  } catch (e) {
+    print('Error in sendNotification: $e');
+  }
 }

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../models/glass.dart';
+import '../models/notification.dart' as custom_notification;
+import '../models/notification.dart';
 import '../services/bluetooth_manager.dart';
 import '../services/commands.dart';
 import '../widgets/glass_status.dart';
+
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -154,6 +157,24 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
+void _sendNotification() async {
+  String message = _textController.text;
+  if (message.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter a message to send')),
+    );
+    return;
+  }
+
+  if (bluetoothManager.leftGlass != null && bluetoothManager.rightGlass != null) {
+    await sendNotification(message, bluetoothManager);
+  } else { 
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Glasses are not connected')),
+    );
+  }
+}
+
   @override
   void dispose() {
     bluetoothManager.leftGlass?.disconnect();
@@ -194,9 +215,18 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _sendText,
-              child: const Text('Send Text'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: _sendText,
+                  child: const Text('Send Text'),
+                ),
+                ElevatedButton(
+                  onPressed: _sendNotification,
+                  child: const Text('Send Notification'),
+                ),
+              ],
             ),
           ],
         ),
