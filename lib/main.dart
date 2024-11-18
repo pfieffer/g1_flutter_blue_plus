@@ -5,10 +5,8 @@ import 'screens/home_page.dart';
 
 void main() {
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => GlassProvider()),
-      ],
+    ChangeNotifierProvider(
+      create: (_) => GlassProvider(),
       child: const MyApp(),
     ),
   );
@@ -21,9 +19,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Bluetooth App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
+      theme: ThemeData(primarySwatch: Colors.blue),
       home: const MyHomePage(),
     );
   }

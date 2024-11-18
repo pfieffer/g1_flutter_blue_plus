@@ -1,9 +1,11 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 import '../utils/constants.dart';
 import '../models/glass.dart';
+import 'commands.dart';
+import 'dart:convert';
 
-// Define callback types for clarity
 typedef OnGlassFound = void Function(Glass);
 typedef OnScanTimeout = void Function(String);
 typedef OnScanError = void Function(String);
@@ -11,6 +13,10 @@ typedef OnScanError = void Function(String);
 class BluetoothManager {
   Glass? leftGlass;
   Glass? rightGlass;
+  Timer? _scanTimer;
+  bool _isScanning = false;
+  int _retryCount = 0;
+  static const int maxRetries = 3;
 
   Future<void> _requestPermissions() async {
     Map<Permission, PermissionStatus> statuses = await [
@@ -20,107 +26,168 @@ class BluetoothManager {
       Permission.location,
     ].request();
 
-    if (statuses[Permission.bluetooth]!.isDenied ||
-        statuses[Permission.bluetoothScan]!.isDenied ||
-        statuses[Permission.bluetoothConnect]!.isDenied ||
-        statuses[Permission.location]!.isDenied) {
-      // Permissions are denied, show a message and exit
-      throw Exception('Permissions are required to use Bluetooth');
+    if (statuses.values.any((status) => status.isDenied)) {
+      throw Exception('All permissions are required to use Bluetooth');
     }
   }
 
-  void startScanAndConnect({
+  Future<void> startScanAndConnect({
     required OnGlassFound onGlassFound,
     required OnScanTimeout onScanTimeout,
     required OnScanError onScanError,
   }) async {
-    await _requestPermissions();
+    try {
+      await _requestPermissions();
 
-    // Start scanning for devices
-    FlutterBluePlus.startScan(
-      timeout: Duration(seconds: 10),
-    ).then((_) {
-      print('Scanning started');
-    }).catchError((error) {
-      print('Error starting scan: $error');
-      onScanError('Failed to start scan: $error');
-    });
-
-    // Listen to scan results with additional logs
-    FlutterBluePlus.scanResults.listen((results) {
-      print('Scan started, listening for results...');
-      for (ScanResult result in results) {
-        String deviceName = result.device.name;
-        String deviceId = result.device.id.id;
-        print('Found device: $deviceName with ID: $deviceId');
-
-        if (deviceName.contains('_L_') && leftGlass == null) {
-          // Connect to Left Glass
-          Glass glass = Glass(
-            name: deviceName,
-            device: result.device,
-            side: 'left',
-            onLeftStatusChanged: (status) {
-              // Handle left status changes if needed
-            },
-            onRightStatusChanged: (status) {
-              // Handle right status changes if needed
-            },
-          );
-          leftGlass = glass;
-          onGlassFound(glass);
-        } else if (deviceName.contains('_R_') && rightGlass == null) {
-          // Connect to Right Glass
-          Glass glass = Glass(
-            name: deviceName,
-            device: result.device,
-            side: 'right',
-            onLeftStatusChanged: (status) {
-              // Handle left status changes if needed
-            },
-            onRightStatusChanged: (status) {
-              // Handle right status changes if needed
-            },
-          );
-          rightGlass = glass;
-          onGlassFound(glass);
-        }
-
-        if (leftGlass != null && rightGlass != null) {
-          FlutterBluePlus.stopScan();
-          print('Both glasses found. Stopping scan.');
-          break;
-        }
+      if (!await FlutterBluePlus.isAvailable) {
+        onScanError('Bluetooth is not available');
+        return;
       }
-    }, onError: (error) {
-      print('Scan error: $error');
-      onScanError('Scan error: $error');
+
+      if (!await FlutterBluePlus.isOn) {
+        onScanError('Bluetooth is turned off');
+        return;
+      }
+
+      // Reset state
+      _isScanning = true;
+      _retryCount = 0;
+      leftGlass = null;
+      rightGlass = null;
+
+      await _startScan(onGlassFound, onScanTimeout, onScanError);
+    } catch (e) {
+      print('Error in startScanAndConnect: $e');
+      onScanError(e.toString());
+    }
+  }
+
+  Future<void> _startScan(OnGlassFound onGlassFound,
+      OnScanTimeout onScanTimeout, OnScanError onScanError) async {
+    await FlutterBluePlus.stopScan();
+    print('Starting new scan attempt ${_retryCount + 1}/$maxRetries');
+
+    // Set scan timeout
+    _scanTimer?.cancel();
+    _scanTimer = Timer(const Duration(seconds: 30), () {
+      if (_isScanning) {
+        _handleScanTimeout(onGlassFound, onScanTimeout, onScanError);
+      }
     });
 
-    // Listen to scanning state with logs
+    await FlutterBluePlus.startScan(
+      timeout: const Duration(seconds: 30),
+      androidUsesFineLocation: true,
+    );
+
+    // Listen for scan results
+    FlutterBluePlus.scanResults.listen(
+      (results) {
+        for (ScanResult result in results) {
+          String deviceName = result.device.name;
+          String deviceId = result.device.id.id;
+          print('Found device: $deviceName ($deviceId)');
+
+          if (deviceName.isNotEmpty) {
+            _handleDeviceFound(result, onGlassFound);
+          }
+        }
+      },
+      onError: (error) {
+        print('Scan results error: $error');
+        onScanError(error.toString());
+      },
+    );
+
+    // Monitor scanning state
     FlutterBluePlus.isScanning.listen((isScanning) {
-      print('Is scanning: $isScanning');
-      if (!isScanning) {
-        print('Scan completed');
-        onScanTimeout('Scan completed');
+      print('Scanning state changed: $isScanning');
+      if (!isScanning && _isScanning) {
+        _handleScanComplete(onGlassFound, onScanTimeout, onScanError);
       }
     });
   }
 
-  Future<void> connectToDevice(BluetoothDevice device, {required String side}) async {
+  void _handleDeviceFound(ScanResult result, OnGlassFound onGlassFound) {
+    String deviceName = result.device.name;
+
+    if (deviceName.contains('_L_') && leftGlass == null) {
+      print('Found left glass: $deviceName');
+      Glass glass = Glass(
+        name: deviceName,
+        device: result.device,
+        side: 'left',
+        onLeftStatusChanged: (status) => print('Left glass status: $status'),
+        onRightStatusChanged: (_) {},
+      );
+      leftGlass = glass;
+      onGlassFound(glass);
+    } else if (deviceName.contains('_R_') && rightGlass == null) {
+      print('Found right glass: $deviceName');
+      Glass glass = Glass(
+        name: deviceName,
+        device: result.device,
+        side: 'right',
+        onLeftStatusChanged: (_) {},
+        onRightStatusChanged: (status) => print('Right glass status: $status'),
+      );
+      rightGlass = glass;
+      onGlassFound(glass);
+    }
+
+    // Stop scanning if both glasses are found
+    if (leftGlass != null && rightGlass != null) {
+      _isScanning = false;
+      stopScanning();
+    }
+  }
+
+  void _handleScanTimeout(OnGlassFound onGlassFound,
+      OnScanTimeout onScanTimeout, OnScanError onScanError) async {
+    print('Scan timeout occurred');
+
+    if (_retryCount < maxRetries && (leftGlass == null || rightGlass == null)) {
+      _retryCount++;
+      print('Retrying scan (Attempt $_retryCount/$maxRetries)');
+      await _startScan(onGlassFound, onScanTimeout, onScanError);
+    } else {
+      _isScanning = false;
+      stopScanning();
+      onScanTimeout(leftGlass == null && rightGlass == null
+          ? 'No glasses found'
+          : 'Scan completed');
+    }
+  }
+
+  void _handleScanComplete(OnGlassFound onGlassFound,
+      OnScanTimeout onScanTimeout, OnScanError onScanError) {
+    if (_isScanning && (leftGlass == null || rightGlass == null)) {
+      _handleScanTimeout(onGlassFound, onScanTimeout, onScanError);
+    }
+  }
+
+  Future<void> connectToDevice(BluetoothDevice device,
+      {required String side}) async {
     try {
-      await device.connect();
+      print('Attempting to connect to $side glass: ${device.name}');
+      await device.connect(timeout: const Duration(seconds: 15));
       print('Connected to $side glass: ${device.name}');
 
-      // Discover services
       List<BluetoothService> services = await device.discoverServices();
+      print('Discovered ${services.length} services for $side glass');
+
       for (BluetoothService service in services) {
-        if (service.uuid.toString().toUpperCase() == BluetoothConstants.UART_SERVICE_UUID) {
-          for (BluetoothCharacteristic characteristic in service.characteristics) {
-            if (characteristic.uuid.toString().toUpperCase() == BluetoothConstants.UART_TX_CHAR_UUID) {
-              // Handle TX Characteristic
-            } else if (characteristic.uuid.toString().toUpperCase() == BluetoothConstants.UART_RX_CHAR_UUID) {
-              // Handle RX Characteristic
+        if (service.uuid.toString().toUpperCase() ==
+            BluetoothConstants.UART_SERVICE_UUID) {
+          print('Found UART service for $side glass');
+          for (BluetoothCharacteristic characteristic
+              in service.characteristics) {
+            if (characteristic.uuid.toString().toUpperCase() ==
+                BluetoothConstants.UART_TX_CHAR_UUID) {
+              print('Found TX characteristic for $side glass');
+            } else if (characteristic.uuid.toString().toUpperCase() ==
+                BluetoothConstants.UART_RX_CHAR_UUID) {
+              print('Found RX characteristic for $side glass');
             }
           }
         }
@@ -128,12 +195,15 @@ class BluetoothManager {
     } catch (e) {
       print('Error connecting to $side glass: $e');
       await device.disconnect();
+      rethrow;
     }
   }
 
   void stopScanning() {
+    _scanTimer?.cancel();
     FlutterBluePlus.stopScan().then((_) {
       print('Stopped scanning');
+      _isScanning = false;
     }).catchError((error) {
       print('Error stopping scan: $error');
     });

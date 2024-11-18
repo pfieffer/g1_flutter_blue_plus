@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:provider/provider.dart';
 import '../models/glass.dart';
 import '../services/bluetooth_manager.dart';
 import '../services/commands.dart';
 import '../widgets/glass_status.dart';
-import '../providers/glass_provider.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -33,29 +30,50 @@ class _MyHomePageState extends State<MyHomePage> {
     // Your existing permission request logic
   }
 
-  void _scanAndConnect() {
-    setState(() {
-      leftStatus = 'Scanning...';
-      rightStatus = 'Scanning...';
-    });
+  void _scanAndConnect() async {
+    try {
+      setState(() {
+        leftStatus = 'Scanning...';
+        rightStatus = 'Scanning...';
+      });
 
-    bluetoothManager.startScanAndConnect(
-      onGlassFound: (Glass glass) {
-        _connectToGlass(glass);
-      },
-      onScanTimeout: (message) {
-        setState(() {
-          leftStatus = 'Scan Timeout';
-          rightStatus = 'Scan Timeout';
-        });
-      },
-      onScanError: (error) {
-        setState(() {
-          leftStatus = 'Scan Error';
-          rightStatus = 'Scan Error';
-        });
-      },
-    );
+      await bluetoothManager.startScanAndConnect(
+        onGlassFound: (Glass glass) async {
+          print('Glass found: ${glass.name} (${glass.side})');
+          await _connectToGlass(glass);
+        },
+        onScanTimeout: (message) {
+          print('Scan timeout: $message');
+          setState(() {
+            if (bluetoothManager.leftGlass == null) {
+              leftStatus = 'Not Found';
+            }
+            if (bluetoothManager.rightGlass == null) {
+              rightStatus = 'Not Found';
+            }
+          });
+        },
+        onScanError: (error) {
+          print('Scan error: $error');
+          setState(() {
+            leftStatus = 'Scan Error';
+            rightStatus = 'Scan Error';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Scan error: $error')),
+          );
+        },
+      );
+    } catch (e) {
+      print('Error in _scanAndConnect: $e');
+      setState(() {
+        leftStatus = 'Error';
+        rightStatus = 'Error';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
   }
 
   Future<void> _connectToGlass(Glass glass) async {
@@ -115,40 +133,22 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _sendText() async {
-    String text = _textController.text;
-    if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter some text to send')),
-      );
-      return;
-    }
-
-    // Construct SendResult packet
-    SendResult sendResult = SendResult(
-      command: Command.SEND_RESULT,
-      data: utf8.encode(text),
+  String text = _textController.text;
+  if (text.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter some text to send')),
     );
-
-    List<int> packet = sendResult.build();
-
-    if (bluetoothManager.leftGlass != null && bluetoothManager.leftGlass!.uartTx != null) {
-      await bluetoothManager.leftGlass!.sendData(packet);
-    } else {
-      print('[left Glass] Not connected or UART TX not available.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Left Glass is not connected')),
-      );
-    }
-
-    if (bluetoothManager.rightGlass != null && bluetoothManager.rightGlass!.uartTx != null) {
-      await bluetoothManager.rightGlass!.sendData(packet);
-    } else {
-      print('[right Glass] Not connected or UART TX not available.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Right Glass is not connected')),
-      );
-    }
+    return;
   }
+
+  if (bluetoothManager.leftGlass != null && bluetoothManager.rightGlass != null) {
+    await sendTextPacket(textMessage: text, bluetoothManager: bluetoothManager);
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Glasses are not connected')),
+    );
+  }
+}
 
   @override
   void dispose() {
@@ -160,7 +160,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final glassProvider = Provider.of<GlassProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
