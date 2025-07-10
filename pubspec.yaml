@@ -31,7 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_blue_plus: ^1.4.4  # Ensure this is the latest stable version
-  permission_handler: ^10.2.0
+  permission_handler: ^12.0.1
   provider: ^6.0.0
   intl: ^0.18.0
 
